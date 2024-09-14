@@ -1,0 +1,14 @@
+Rpc:
+  - "ws://8.210.223.137:9947/"
+DeossUrl: "https://deoss-hk.cess.network"
+Mnemonic: ""
+Territory: "Annas-Archive"
+Bucket: "annas"
+ChunksDir: "./chunks/"
+FidFeedbackRecordPath: "./"
+SeedMappingRecordPath: "./seed_hash_mapping.txt"
+TorrentWs: ""
+TorrentLogin: ""
+TorrentSiteAccount: ""
+TorrentSitePsw: ""
+SeedSendForDownloadOnce: 20
