@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"deoss_upload/adapter"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -99,7 +100,7 @@ func (config *SdkInfo) UploadAllFileUnderPath(allfilepath string) {
 	uploadFileName := filepath.Base(filepath.Clean(allfilepath))
 
 	//sci-hub seed file specify adapter
-	recordFileName := SicHubAdapter(uploadFileName)
+	recordFileName := adapter.SicHubAdapter(uploadFileName)
 	log.Printf("Trying to upload %v file to deoss...", recordFileName)
 
 	recordfile, err := os.OpenFile(filepath.Join(config.FidFeedbackRecordPath, recordFileName), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
