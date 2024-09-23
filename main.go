@@ -97,7 +97,12 @@ func main() {
 func (config *SdkInfo) UploadAllFileUnderPath(allfilepath string) {
 
 	uploadFileName := filepath.Base(filepath.Clean(allfilepath))
-	recordfile, err := os.OpenFile(filepath.Join(config.FidFeedbackRecordPath, uploadFileName), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+
+	//sci-hub seed file specify adapter
+	recordFileName := SicHubAdapter(uploadFileName)
+	log.Printf("Trying to upload %v file to deoss...", recordFileName)
+
+	recordfile, err := os.OpenFile(filepath.Join(config.FidFeedbackRecordPath, recordFileName), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatalf("Error opening/creating fid record file,because:%v\n", err)
 		return
@@ -180,6 +185,8 @@ func (config *SdkInfo) SendTorrentSeedForDownload(allfilepath string) {
 	//range all the seed and send specific number of seed to download site
 A:
 	for _, file := range files {
+		//wait for server processing
+		time.Sleep(time.Second * 10)
 		seedPath := filepath.Join(allfilepath, file.Name())
 		seedByte, err := os.ReadFile(seedPath)
 		if err != nil {
@@ -219,7 +226,7 @@ A:
 				}
 
 				log.Printf("Received response from server :%v\n", resp)
-				if resp.State == "success" {
+				if resp.State == "success" && strings.Contains(resp.Message, "torrent spec added") {
 					err = os.Remove(seedPath)
 					if err != nil {
 						log.Fatalf("remove seed file %v after send to download site fail ,because:%v\n", seedPath, err.Error())
@@ -240,6 +247,7 @@ A:
 						log.Printf("This send seed task ,total %v files has been send!", config.SeedSendForDownloadOnce)
 						return
 					}
+					log.Printf("**********START NEXT SEED**********")
 					continue A
 				}
 			}
