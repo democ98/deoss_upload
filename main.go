@@ -42,6 +42,13 @@ type TorrentRequest struct {
 	Data1   []byte `json:"data1"`
 	Data2   string `json:"data2"`
 }
+type ConReq struct {
+	Command string      `json:"command"`
+	Data1   interface{} `json:"data1"`
+	Data2   interface{} `json:"data2"`
+	Data3   interface{} `json:"data3"`
+	Aop     int         `json:"aop"`
+}
 
 type TorrentResponse struct {
 	Type     string `json:"type"`
@@ -61,13 +68,14 @@ type AuthResponse struct {
 }
 
 func main() {
-	var list string
-	flag.StringVar(&list, "files", "", "list of files that you want to upload,separate with space. Example:-files \"/cess/file1 /cess/file2\"")
-	var fileQueue string
-	flag.StringVar(&fileQueue, "filepaths", "", "list of filepath,will upload all the files under these filepaths orderly,separate with space. Example:-filepaths \"/cess1/ /cess2/\"")
+	var filepaths string
+	flag.StringVar(&filepaths, "filepaths", "", "list of filepath,will upload all the files under these filepaths orderly,separate with space. Example:-filepaths \"/cess1/ /cess2/\"")
 
 	var torrentFile string
 	flag.StringVar(&torrentFile, "torrent_seed_files", "", "Send your local torrent seeds under specific file to the download site in batches.Example:-torrent_seed_files=\"/home/demoschiang/Downloads/torrent-list\"")
+
+	var torrentDelete string
+	flag.StringVar(&torrentDelete, "torrent_delete_list", "", "list of the torrent file hash that you want to delete,separate with space. Example:-torrent_seed_delete \"5eb63cc7d28adedb7bbb6c9ee04128e6ea1bb509 356227440f062eefbb7c83e1274eac01cf7f3b06\"")
 
 	flag.Parse()
 
@@ -76,18 +84,19 @@ func main() {
 		log.Fatal(err)
 	}
 
-	if list != "" {
-		someFileList := strings.Split(list, " ")
-		sdkinfo.UploadSomeFileUnderPath(someFileList)
-	} else if fileQueue != "" {
-		allFilePathQueue := strings.Split(fileQueue, " ")
-		log.Printf("allFilePathQueue:%v", allFilePathQueue)
-		for _, file := range allFilePathQueue {
+	if filepaths != "" {
+		allfilepaths := strings.Split(filepaths, " ")
+		for _, file := range allfilepaths {
 			sdkinfo.UploadAllFileUnderPath(file)
 			log.Printf("#####################################File %s is finished##############################################\n", file)
 		}
 	} else if torrentFile != "" {
 		sdkinfo.SendTorrentSeedForDownload(torrentFile)
+	} else if torrentDelete != "" {
+		torrentDeleteList := strings.Split(torrentDelete, " ")
+		for _, torrentHash := range torrentDeleteList {
+			sdkinfo.DeleteTorrent(torrentHash)
+		}
 	} else {
 		log.Printf("Please check usage with --help\n")
 		return
@@ -98,6 +107,7 @@ func main() {
 func (config *SdkInfo) UploadAllFileUnderPath(allfilepath string) {
 
 	uploadFileName := filepath.Base(filepath.Clean(allfilepath))
+	torrentHash := filepath.Base(filepath.Dir(allfilepath))
 
 	//sci-hub seed file specify adapter
 	recordFileName := adapter.SicHubAdapter(uploadFileName)
@@ -116,23 +126,24 @@ func (config *SdkInfo) UploadAllFileUnderPath(allfilepath string) {
 		log.Fatalf("Fail to read file path %s when upload all file,because:%v:", allfilepath, err)
 		return
 	}
-	for i, file := range files {
-		if !file.IsDir() {
-			chunksDir := path.Join(config.ChunksDir, uploadFileName, file.Name())
+	for i := 0; i < len(files); i++ {
+		if !files[i].IsDir() {
+			chunksDir := path.Join(config.ChunksDir, uploadFileName, files[i].Name())
 			_, err = os.Stat(chunksDir)
 			if err != nil {
-				log.Printf("[Index%v] Trying to process file %s,and create", i, filepath.Join(allfilepath, file.Name()))
+				log.Printf("[Index%v] Trying to process file %s,and create\n", i, filepath.Join(allfilepath, files[i].Name()))
 				os.MkdirAll(chunksDir, 0777)
 			}
 
-			size, num, err := process.SplitFileWithstandardSize(filepath.Join(allfilepath, file.Name()), chunksDir)
+			size, num, err := process.SplitFileWithstandardSize(filepath.Join(allfilepath, files[i].Name()), chunksDir)
 			if err != nil {
 				log.Fatal(err)
 			}
-			log.Printf("The file %s has been split into %v chunks,each one size is %v", filepath.Join(allfilepath, file.Name()), num, size)
-			res, err := process.UploadFileChunks(config.DeossUrl+"/chunks", config.Mnemonic, chunksDir, config.Territory, config.Bucket, file.Name(), "", num, size)
+			log.Printf("The file %s has been split into %v chunks,each one size is %v", filepath.Join(allfilepath, files[i].Name()), num, size)
+			res, err := process.UploadFileChunks(config.DeossUrl+"/chunks", config.Mnemonic, chunksDir, config.Territory, config.Bucket, files[i].Name(), "", num, size)
 			if err != nil {
 				log.Printf("Response from deoss is %s,error is :%v\n", res, err)
+				i--
 				continue
 			}
 			log.Println("upload file chunks success, response is", res)
@@ -146,6 +157,7 @@ func (config *SdkInfo) UploadAllFileUnderPath(allfilepath string) {
 			}
 		}
 	}
+	config.DeleteTorrent(torrentHash)
 }
 
 func (config *SdkInfo) UploadSomeFileUnderPath(pathlist []string) {
@@ -251,6 +263,80 @@ A:
 					log.Printf("**********START NEXT SEED**********")
 					continue A
 				}
+			}
+		}
+	}
+}
+
+func (config *SdkInfo) DeleteTorrent(torrentHash string) {
+	//login first get session
+	session, err := config.TorrentAuthenticate()
+	if err != nil {
+		log.Fatalf("Get WebSocket key from torrent site fail,because :%v", err.Error())
+		return
+	}
+
+	headers := http.Header{}
+	headers.Add("Cookie", "session_token="+session)
+	conn, _, err := websocket.DefaultDialer.Dial(config.TorrentWs, headers)
+	if err != nil {
+		log.Fatal("Dial error:", err)
+	}
+	defer conn.Close()
+
+	reqRemove := ConReq{
+		Command: "removetorrent",
+		Data1:   torrentHash,
+	}
+	reqRemoveJSON, err := json.Marshal(&reqRemove)
+	if err != nil {
+		log.Fatalf("request for remove torrent source file fail , because :%v\n", err)
+		return
+	}
+
+	err = conn.WriteMessage(websocket.TextMessage, reqRemoveJSON)
+	if err != nil {
+		log.Fatal("Write for remove torrent file error:", err)
+	}
+
+	reqDelete := ConReq{
+		Command: "deletetorrent",
+		Data1:   torrentHash,
+	}
+	reqDeleteJSON, err := json.Marshal(&reqDelete)
+	if err != nil {
+		log.Fatalf("request for delete torrent source file fail , because :%v\n", err)
+		return
+	}
+
+	err = conn.WriteMessage(websocket.TextMessage, reqDeleteJSON)
+	if err != nil {
+		log.Fatal("Write for delete torrent file error:", err)
+	}
+
+	readTimeout := time.After(time.Minute)
+B:
+	for {
+		select {
+		case <-readTimeout:
+			log.Printf("Timeout when read message from server!")
+			return
+		default:
+			_, message, err := conn.ReadMessage()
+			if err != nil {
+				log.Printf("Read resp from torrent delete site error:%v\n", err)
+				continue B
+			}
+			var resp TorrentResponse
+			err = json.Unmarshal(message, &resp)
+			if err != nil {
+				log.Fatalf("Unmarshal resp from torrent delete site error:%v\n", err)
+			}
+
+			log.Printf("Received response from server :%v\n", resp)
+			if resp.State == "success" && strings.Contains(resp.Message, "Torrent Deleted") {
+				log.Printf("Delete torrent source file %v success!", resp.InfoHash)
+				return
 			}
 		}
 	}
