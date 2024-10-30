@@ -107,7 +107,7 @@ func main() {
 func (config *SdkInfo) UploadAllFileUnderPath(allfilepath string) {
 
 	uploadFileName := filepath.Base(filepath.Clean(allfilepath))
-	torrentHash := filepath.Base(filepath.Dir(allfilepath))
+	torrentHash := filepath.Base(filepath.Dir(filepath.Clean(allfilepath)))
 
 	//sci-hub seed file specify adapter
 	recordFileName := adapter.SicHubAdapter(uploadFileName)
